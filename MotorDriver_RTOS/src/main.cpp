@@ -66,13 +66,17 @@ void env_volt(double vp)
 }
 void mostrar_velocidad(void *pvParameters)
 {
+  double t = 0;
   while(1)
   {
     // vTaskDelay(1500);
+    Serial.print(t);
+    Serial.print("  	");
     Serial.print(vpg);
     Serial.print("  	");
     Serial.println(vel_ang_filt); // Imprime el período
-    vTaskDelay(10);
+    t+=0.025;
+    vTaskDelay(25);
   }
 }
 
@@ -80,9 +84,9 @@ void variar_voltaje(void *pvParameters)
 {    
   while(1)
   {
-    vpg += 0.5;
-    if (vpg > 2.5) vpg = -2.5;
-    
+    // vpg += 0.5;
+    // if (vpg > 2.5) vpg = -2.5;
+    vpg = 1.5;
     env_volt(vpg);
 
     vTaskDelay(2000);
