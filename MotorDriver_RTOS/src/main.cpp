@@ -96,7 +96,7 @@ void mostrar_velocidad(void *pvParameters)
     Serial.print("  	");
     Serial.print(vpg); // Vector de voltaje 
     Serial.print("  	");
-    Serial.print(vel_ang_median); // Vector de voltaje 
+    Serial.print(vel_ang_median); // Vector de velocidad (tras filtro mediana)
     Serial.print("  	");
     Serial.println(vel_ang_filt); // Vector velocidad (tras filtro pasabajo)
     t+=0.025;
