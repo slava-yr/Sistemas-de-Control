@@ -7,6 +7,7 @@
 #define CH_B 35
 
 double periodo=10000000;
+
 double tiempo;
 double velang;
 double velangfa=0;
@@ -24,17 +25,18 @@ double posicion;
 void IRAM_ATTR ISR_FUN()  {  
   double velangf;
 
-  periodo = micros()-tiempo;
-  tiempo = micros();
+  periodo = micros()-tiempo; // Update period
+  tiempo = micros(); // Update interrupt time
 
   if (digitalRead(CH_B)==1){
-    velang = 360.0/(periodo*0.000001*Resolucion);
-    contador=contador+1;   // Contador de interrupciones
+    velang = 360.0/(periodo*0.000001*Resolucion); // Computer angular velocity
+    contador=contador+1;   // Interrupt counter
   }
   else {
     velang = -360.0/(periodo*0.000001*Resolucion);
     contador=contador-1;
   }
+
   //Aplicando el filtro mediana
   if (((velang<vel_1)&&(velang>=vel_2))||((velang>=vel_1)&&(velang<vel_2))){
     velangf = velang;
@@ -46,8 +48,10 @@ void IRAM_ATTR ISR_FUN()  {
     velangf = vel_2;
   }
 
+  // Compute angular position
   posicion = 360*contador/Resolucion; // Ángulo
 
+  // Update past velocity values
   vel_2 = vel_1;
   vel_1 = velang;
 
@@ -59,22 +63,13 @@ void IRAM_ATTR ISR_FUN()  {
     velangfb=velangf;
     numbuffer=0;
   }
-  velangfc=velangf;
-}
 
-double velocidad(void){
-  if (numbuffer==0){
-    return velangfb;
-  }
-  else
-  {
-    return velangfa;
-  }
+  velangfc=velangf;
 }
 
 void env_volt(double vmotor){
   double vm = 5; //voltaje máximo
-  uint32_t D;
+  uint32_t D; // Duty Cycle
 
   // Saturación a +3V o -3V 
   if (vmotor>3.0){
@@ -96,66 +91,64 @@ void env_volt(double vmotor){
     ledcWrite(1,D); //Duty cycle 
     ledcWrite(2,1024); //Duty cycle 100%
   }
-
 }
 
-void filtrar_vel(void *pvParameters){
+void filtrar_vel(void *pvParameters) // Low pass filter
+{
   double yp;
-  double Tf = 0.005;
+  double Tf = 0.005; // 5 ms
   double wc = 50;
   double y_1 =0;
-  double y =0;
-  // double t=0;
+  double y=0;
+
   while (1){
     yp=(velangfc-y)*wc;
     y=y_1+yp*Tf;
-    velangf2=y;
-    y_1=y;
-    // t=t+5;    
+    velangf2=y; // Filtered angular velocity
+    y_1=y;    
     vTaskDelay(5);
-  }
-}
-
-void mostrar_vel(void *pvParameters){
-  double t = 0;
-  while (1){
-    Serial.print(t);
-    Serial.print("  ");
-    Serial.print(vmotorg);
-    Serial.print("  ");
-    Serial.print(velangfc);
-    Serial.print("  ");
-    Serial.println(velangf2);
-    t=t+20;
-    vTaskDelay(20);
   }
 }
 
 void control_pos(void *pvParameters){
   double t =0;
-  double Kp = 0.0378;
-  double Td = 0.1;
+  double T=0.05; // Periodo de muestreo
+  // Parámetros del controlador PID
+  double Kp = 0.0669;
+  double Ti = 1;
+  double Td = 0.25;
+
+  // Variables de la regla de control
   double e_ant = 0;
+  double I_ant = 0;
+  double e = 0;
+  double I = 0;
   double D;
-  double e;
-  double tetad = 90; 
-  double T=0.05;
+
+  // Posición deseada
+  double tetad = -30; 
+  
   double u;
 
   while (1){
     e = (tetad-posicion);
+
     D = (e-e_ant)/T;
-    u = Kp*(e+Td*D);
+    I = I_ant + e*T;
+
+    u = Kp*(e+ (1/Ti)*I + Td*D);
+
     env_volt(u);
     e_ant = e;
+    I_ant = I;
 
     Serial.print(t);
     Serial.print("  ");
     Serial.print(u);
     Serial.print("  ");
-    Serial.print(velangfc);
+    Serial.print(velangf2); // Show filtered speed
     Serial.print("  ");
-    Serial.println(posicion);
+    Serial.println(posicion); // Show position
     t=t+50;
     vTaskDelay(50);
   }
@@ -180,7 +173,7 @@ void setup() {
   Serial.begin(115200);
 
   xTaskCreatePinnedToCore(filtrar_vel," ", 4000, NULL, 3 , NULL, 1); // Low Pass Filter
-  xTaskCreatePinnedToCore(mostrar_vel," ", 4000, NULL, 2 , NULL, 1); // ishowspeed
+  // xTaskCreatePinnedToCore(mostrar_vel," ", 4000, NULL, 2 , NULL, 1); // ishowspeed
   xTaskCreatePinnedToCore(control_pos," ", 4000, NULL, 2 , NULL, 1); // PID position control
 }
 
