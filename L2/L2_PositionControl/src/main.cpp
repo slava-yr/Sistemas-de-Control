@@ -126,7 +126,7 @@ void control_pos(void *pvParameters){
   double D;
 
   // Posición deseada
-  double tetad = -30; 
+  double tetad = 100; 
   
   double u;
 
