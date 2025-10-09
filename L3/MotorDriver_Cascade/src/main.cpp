@@ -27,7 +27,10 @@ double vel_2=0;
 double vmotorg=0;
 int numbuffer=0;
 double contador=0;
-double posicion;
+double vel_deseada; 
+double posicion; 
+double pos_r; // Posición deseada recibida por MQTT
+double tetad = 100; // Posición deseada
 
 void IRAM_ATTR ISR_FUN()  {  
   double velangf;
@@ -74,6 +77,17 @@ void IRAM_ATTR ISR_FUN()  {
   velangfc=velangf;
 }
 
+void Mqtt_Callback(char* topicx, byte* Data, unsigned int DataLen){
+	String RecievedData = String((char*)Data, DataLen);
+	String Topic = String((char*)topicx);
+
+	if (Topic == "xspaceserver/prueba"){
+    tetad = RecievedData.toDouble();
+		Serial.println(RecievedData);
+	}
+}
+
+
 void env_volt(double vmotor){
   double vm = 5; //voltaje máximo
   uint32_t D; // Duty Cycle
@@ -117,38 +131,33 @@ void filtrar_vel(void *pvParameters) // Low pass filter
   }
 }
 
-void control_pos(void *pvParameters){
-  double t =0;
-  double T=0.05; // Periodo de muestreo
-  // Parámetros del controlador PID
-  double Kp = 0.0669;
-  double Ti = 1;
-  double Td = 0.25;
+void lazo_interno(void *pvParameters) // PI velocity control
+{
+  double t = 0;
+  double T = 0.01;
+  double Kp_i = 0.0597;
+  double Ti = 0.1;
 
   // Variables de la regla de control
-  double e_ant = 0;
   double I_ant = 0;
   double e = 0;
   double I = 0;
-  double D;
-
-  // Posición deseada
-  double tetad = 100; 
-  
   double u;
 
-  while (1){
-    e = (tetad-posicion);
-
-    D = (e-e_ant)/T;
+  while (1)
+  {
+    e = (vel_deseada - velangf2); // error de velocidad
     I = I_ant + e*T;
 
-    u = Kp*(e+ (1/Ti)*I + Td*D);
-
+    u = Kp_i*(e+ (1/Ti)*I);
     env_volt(u);
-    e_ant = e;
-    I_ant = I;
 
+    char msg_temp[20];
+    client.loop(); // Mantener la conexión MQTT activa
+    sprintf(msg_temp, "%f", posicion);
+    client.publish("the_xspacer/mivalor", msg_temp);
+    
+    I_ant = I;
     Serial.print(t);
     Serial.print("  ");
     Serial.print(u);
@@ -156,12 +165,27 @@ void control_pos(void *pvParameters){
     Serial.print(velangf2); // Show filtered speed
     Serial.print("  ");
     Serial.println(posicion); // Show position
-    t=t+50;
-    vTaskDelay(50);
+    t=t+10;
+    vTaskDelay(10);
   }
 }
 
-void setup() {
+void lazo_externo(void *pvParameters)
+{
+  double e;
+  double Kp_e = 1.61; // Ganancia proporcional externa
+
+  while(1)
+  {
+    e = (tetad - posicion); // errar en la posición
+
+    vel_deseada = Kp_e*e; // Señal de referencia para el lazo interno
+    vTaskDelay(30); // Período de muestreo de 30 ms 
+  }
+}
+
+void setup() 
+{
   pinMode(SLEEP,OUTPUT);
   digitalWrite(SLEEP,HIGH);
 
@@ -186,10 +210,27 @@ void setup() {
   }
   Serial.println("Conectado a WiFi ");
 
-  
+  // MQTT
+  client.setServer("www.xspace.pe", 1883); 
+	while (!client.connected())
+  { 
+    Serial.println("Connecting to MQTT...");
+    if (client.connect("ESP32Client")) 
+      Serial.println("connected");
+    else
+    {
+      Serial.print("failed with state ");
+    	Serial.print(client.state());
+      delay(1000);
+    }
+  }
+
+  client.setCallback(Mqtt_Callback);
+	client.subscribe("xspaceserver/prueba");
+
   xTaskCreatePinnedToCore(filtrar_vel," ", 4000, NULL, 3 , NULL, 1); // Low Pass Filter
-  // xTaskCreatePinnedToCore(mostrar_vel," ", 4000, NULL, 2 , NULL, 1); // ishowspeed
-  xTaskCreatePinnedToCore(control_pos," ", 4000, NULL, 2 , NULL, 1); // PID position control
+  xTaskCreatePinnedToCore(lazo_interno," ", 4000, NULL, 2 , NULL, 1); // PI speed control
+  xTaskCreatePinnedToCore(lazo_externo," ", 4000, NULL, 2 , NULL, 1); // Proportional position control
 }
 
 void loop() {}
