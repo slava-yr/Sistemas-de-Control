@@ -24,7 +24,7 @@ void setup() {
   ledcSetup(1,20000,10);
   ledcSetup(2,20000,10);
 
-  // Attach to encoder pins
+  // Attach to motor pins
   ledcAttachPin(IN1,1);
   ledcAttachPin(IN2,2);
   

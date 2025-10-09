@@ -82,8 +82,7 @@ void env_volt(double vp)
     Duty = (uint32_t)((1+vp/vm)*1023);
     ledcWrite(1,Duty); // Duty Cycle 100%
     ledcWrite(2,1023);
-  }
-  
+  } 
 }
 
 void mostrar_velocidad(void *pvParameters)
