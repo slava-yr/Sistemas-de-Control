@@ -2,13 +2,14 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-#define WIFI_SSID "REDPUCP"
+#define WIFI_SSID "redpucp"
 #define WIFI_PASSWORD "C9AA28BA93"
 #define IN1 32
 #define IN2 33
 #define SLEEP 25
 #define CH_A 34
 #define CH_B 35
+#define TOPIC "xspaceserver/getPos0408"
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -30,7 +31,7 @@ double contador=0;
 double vel_deseada; 
 double posicion; 
 double pos_r; // Posición deseada recibida por MQTT
-double tetad = 100; // Posición deseada
+double tetad = 80; // Posición deseada
 
 void IRAM_ATTR ISR_FUN()  {  
   double velangf;
@@ -81,7 +82,7 @@ void Mqtt_Callback(char* topicx, byte* Data, unsigned int DataLen){
 	String RecievedData = String((char*)Data, DataLen);
 	String Topic = String((char*)topicx);
 
-	if (Topic == "xspaceserver/prueba"){
+	if (Topic == TOPIC){
     tetad = RecievedData.toDouble();
 		Serial.println(RecievedData);
 	}
@@ -135,8 +136,8 @@ void lazo_interno(void *pvParameters) // PI velocity control
 {
   double t = 0;
   double T = 0.01;
-  double Kp_i = 0.0597;
-  double Ti = 0.1;
+  double Kp_i = 0.016;
+  double Ti = 0.1250;
 
   // Variables de la regla de control
   double I_ant = 0;
@@ -155,32 +156,32 @@ void lazo_interno(void *pvParameters) // PI velocity control
     char msg_temp[20];
     client.loop(); // Mantener la conexión MQTT activa
     sprintf(msg_temp, "%f", posicion);
-    client.publish("the_xspacer/mivalor", msg_temp);
+    client.publish("the_xspacer/val0408", msg_temp);
     
     I_ant = I;
     Serial.print(t);
     Serial.print("  ");
     Serial.print(u);
-    Serial.print("  ");
-    Serial.print(velangf2); // Show filtered speed
+    // Serial.print("  ");
+    // Serial.print(velangf2); // Show filtered speed
     Serial.print("  ");
     Serial.println(posicion); // Show position
-    t=t+10;
-    vTaskDelay(10);
+    t=t+30;
+    vTaskDelay(30); // Período de muestreo de 30 ms
   }
 }
 
 void lazo_externo(void *pvParameters)
 {
   double e;
-  double Kp_e = 1.61; // Ganancia proporcional externa
+  double Kp_e = 1.22; // Ganancia proporcional externa
 
   while(1)
   {
-    e = (tetad - posicion); // errar en la posición
+    e = (tetad - posicion); // error en la posición
 
     vel_deseada = Kp_e*e; // Señal de referencia para el lazo interno
-    vTaskDelay(30); // Período de muestreo de 30 ms 
+    vTaskDelay(90); // Período de muestreo de 90 ms 
   }
 }
 
@@ -226,7 +227,7 @@ void setup()
   }
 
   client.setCallback(Mqtt_Callback);
-	client.subscribe("xspaceserver/prueba");
+	client.subscribe(TOPIC);
 
   xTaskCreatePinnedToCore(filtrar_vel," ", 4000, NULL, 3 , NULL, 1); // Low Pass Filter
   xTaskCreatePinnedToCore(lazo_interno," ", 4000, NULL, 2 , NULL, 1); // PI speed control
