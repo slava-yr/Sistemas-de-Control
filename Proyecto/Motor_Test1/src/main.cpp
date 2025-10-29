@@ -1,77 +1,113 @@
+/*****************************
+  Código de prueba de los dos motores para el proyecto de Sistemas de Control 2025-2
+
+  Revisado: 29/10/2025
+  
+*********************************/
+
 #include <Arduino.h>
-
-#define STBY 23
+/* Motor Driver Pins */
 // Motor 1
-#define AIN1 19 // CAMBIAR 
-#define AIN2 21 // CAMBIAR 
-#define PWMA 22 
+#define PWMA 23 
+#define AIN1 18  
+#define AIN2 19 
 
-// // Motor 2
-// #define BIN1 18 // CAMBIAR  
-// #define BIN2 17 // CAMBIAR
-// #define PWMB 16
+// Motor 2
+#define BIN1 5 
+#define BIN2 17 
+#define PWMB 16 
 
-// Encoder
-#define M1_CH_A 15 // Encoder Motor 1
-#define M1_CH_B 16 // Encoder Motor 1
-// #define M2_CH_A  // Encoder Motor 2
+/* Encoder Pins */
+// Encoder motor 1 
+#define EncAM1 14
+#define EncAM2 26
+// Encoder motor 2
+#define EncBM1 27
+#define EncBM2 25
 
 // Filtro pasabajos
 #define wc 50 // Frecuencia de corte del filtro (rad/s)
 #define Tf 0.005 // Tiempo de muestreo (s) [5 ms]
 
 #define Resolucion 1801 // Número de pulsos por revolución del encoder
+// TODO: Definir resolución por encoder
+
 #define VM 11.1 // Voltaje máximo a los motores
 
-double periodo = 1000000;
-double tiempo;
+typedef struct {
+  double periodo;
+  double tiempo;
+  // Posición
+  int32_t contador;
+  double posicion;
+  // Cálculo de velocidad
+  double vel_ang, vel_1, vel_2, vel_ang_median, vel_ang_filt; 
+  // Filtro pasabajos
+  double y_k_1;
+  int numbuffer;
+}MotorVars;
 
-// Cálculo de velocidad
-double vel_ang; // velocidad angular (raw)
-double vel_1 = 0, vel_2 = 0;
-double vel_ang_median; // velocidad angular (filtro mediana)
-double vel_ang_filt; // velocidad angular (filtro pasabajos)
-
-// Filtro pasabajos
-double y_k_1 = 0; // y[k-1]
+// Variables globales de motores
+MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 // Voltaje a enviar al motor
 double Vmotor = 5;
 
-void IRAM_ATTR ISR_FUN_M1() // Calcula el periodo
-{
-  periodo = micros() - tiempo;
-  tiempo = micros(); //update
-  if (digitalRead(M1_CH_B) == 1)
-  {
-    vel_ang = -360.0/(periodo*0.000001*Resolucion);
-  }
-  else
-  {
-    vel_ang = 360.0/(periodo*0.000001*Resolucion);
-  }
-
-  // Filtro mediana
-  if (((vel_ang < vel_1) && (vel_ang > vel_2)) || ((vel_ang > vel_1) && (vel_ang < vel_2)))
-  {
-    vel_ang_median = vel_ang;
-  }
-
-  else if (((vel_1 < vel_ang) && (vel_1 > vel_2)) || ((vel_1 > vel_ang) && (vel_1 < vel_2)))
-  {
-    vel_ang_median = vel_1;
-  }
-  else if (((vel_2 < vel_ang) && (vel_2 > vel_1)) || ((vel_2 > vel_ang) && (vel_2 < vel_1)))
-  {
-    vel_ang_median = vel_2;
-  }
-  
-  vel_2 = vel_1; // vel[k-2]
-  vel_1 = vel_ang; // vel[k-1]
+void IRAM_ATTR ISR_FUN_M1() {
+  isr_func(&motor1, EncAM1, Resolucion);
 }
 
-void env_volt(double vp)
+void IRAM_ATTR ISR_FUN_M2() {
+  isr_func(&motor2, EncBM1, Resolucion);
+}
+
+void isr_func(MotorVars *m, int enc, int resolution)
 {
+  /* Interrupt Service Routine to update motor variables
+    m: pointer to MotorVars struct
+    enc: encoder channel pin
+    resolution: encoder resolution (pulses per revolution)
+  */
+  uint32_t now = micros();
+  m->periodo = now - m->tiempo; // Update period
+  m->tiempo = now; // Update interrupt time
+
+  if (digitalRead(enc) == 1){
+    m->vel_ang = 360.0 / (m->periodo * 0.000001 * resolution); // Compute angular velocity
+    m->contador = m->contador + 1;   // Interrupt counter
+  }
+  else {
+    m->vel_ang = -360.0 / (m->periodo * 1e-6 * resolution);
+    m->contador = m->contador - 1;
+  }
+
+  //Aplicando el filtro mediana
+  if (((m->vel_ang<m->vel_1)&&(m->vel_ang>=m->vel_2))||((m->vel_ang>=m->vel_1)&&(m->vel_ang<m->vel_2))){
+    m->vel_ang_median = m->vel_ang;
+  }
+  else if (((m->vel_1<m->vel_ang)&&(m->vel_1>=m->vel_2))||((m->vel_1>=m->vel_ang)&&(m->vel_1<m->vel_2))){
+    m->vel_ang_median = m->vel_1;
+  }
+  else if (((m->vel_2<m->vel_ang)&&(m->vel_2>=m->vel_1))||((m->vel_2>=m->vel_ang)&&(m->vel_2<m->vel_1))){
+    m->vel_ang_median = m->vel_2;
+  }
+
+  // Compute angular position
+  m->posicion = 360.0*m->contador/resolution; // Ángulo
+
+  // Update past velocity values
+  m->vel_2 = m->vel_1;
+  m->vel_1 = m->vel_ang;
+}
+
+void env_volt(double vp, uint8_t IN1, uint8_t IN2)
+{
+  /* Send voltage to motor driver
+    vp: voltage to send to motor
+    IN1: AIN1 / BIN1 pin
+    IN2: AIN2 / BIN2 pin
+  */
   uint32_t Duty;
  
   if (vp > VM) vp = VM;
@@ -81,30 +117,34 @@ void env_volt(double vp)
   {
     Duty = (uint32_t)((1-vp/VM)*1023);
     ledcWrite(1,1023-Duty);
-    digitalWrite(AIN1, HIGH);
-    digitalWrite(AIN2, LOW);
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
   }
   else
   {
     Duty = (uint32_t)((1+vp/VM)*1023);
     ledcWrite(1,1023-Duty);
-    digitalWrite(AIN1, LOW);
-    digitalWrite(AIN2, HIGH);
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
   } 
 }
 
-void low_pass_filter(void *pvParameters) // Filtro pasabajos
+void low_pass_filter(void *pvParameters)
 {
-  while(1)
+  MotorVars *m = (MotorVars *)pvParameters;  // point to the right motor
+
+  while (1)
   {
-    double x_k = vel_ang_median;
-    double y_k = (1.0/(wc*Tf + 1))*(y_k_1 + wc*Tf*x_k);
-    y_k_1 = y_k; // Update y[k-1] 
-    
-    vel_ang_filt = y_k; // Update global variable
-    vTaskDelay(5); // 5 ms
+    double x_k = m->vel_ang_median;
+    double y_k = (1.0 / (wc * Tf + 1.0)) * (m->y_k_1 + wc * Tf * x_k);
+    m->y_k_1 = y_k;
+    m->vel_ang_filt = y_k;
+
+    vTaskDelay(5);  // 5 ms delay
   }
 }
+
+
 
 void variar_voltaje(void *pvParameters)
 {    
