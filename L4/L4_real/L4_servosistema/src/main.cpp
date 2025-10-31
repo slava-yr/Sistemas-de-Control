@@ -17,7 +17,7 @@ double vel_1=0;
 double vel_2=0;
 double contador=0;
 double posicion; 
-double tetad = 80; // Posición deseada
+double tetad = 100; // Posición deseada
 
 void IRAM_ATTR ISR_FUN()  {  
   double velangf;
@@ -82,8 +82,8 @@ void env_volt(double vmotor){
 void filtrar_vel(void *pvParameters) // Low pass filter
 {
   double yp;
-  double Tf = 0.005; // 5 ms
-  double wc = 50;
+  double Tf = 0.010; // 5 ms
+  double wc = 20;
   double y_1 =0;
   double y=0;
 
@@ -98,14 +98,15 @@ void filtrar_vel(void *pvParameters) // Low pass filter
 
 void servosistema(void *pvParameters) // Servosistema
 {
+  // CAMNBIAR K1, K2 y T
   double t;
-  double K1 = 0.0245;
-  double K2_1 = 0.1352;
-  double K2_2 = 0.0299;
+  double K1 = 0.0339;
+  double K2_1 = 0.1508;
+  double K2_2 = 0.0296;
   double vk_1 = 0; // v[k-1]
   double vk = 0;
   double ek;
-  double T = 0.1; // 100 ms
+  double T = 100; // 100 ms
   double uk;
 
   while(1)
@@ -123,11 +124,30 @@ void servosistema(void *pvParameters) // Servosistema
     Serial.print(velangf2);
     Serial.print("  ");
     Serial.println(posicion);
-    t += T*1000;
-    vTaskDelay(T*1000); // Período de muestreo de 100 ms
+    t += T;
+    vTaskDelay(T); // Período de muestreo de 100 ms
   }
 }
 
+void identificarSistema(void *pvParameters) // Identificación del sistema
+{
+  double t;
+  double vmotor = 3.0; // Step de 3V
+  double T = 10; // 100 ms
+
+  while(1)
+  {
+    env_volt(vmotor);
+
+    Serial.print(t);
+    Serial.print("  ");
+    Serial.print(vmotor);
+    Serial.print("  ");
+    Serial.println(velangf2);
+    t += T;
+    vTaskDelay(T); // Período de muestreo de 100 ms
+  }
+}
 
 void setup() {
   pinMode(SLEEP,OUTPUT);
@@ -148,9 +168,9 @@ void setup() {
   Serial.begin(115200);
 
   // Tasks
-  xTaskCreatePinnedToCore(filtrar_vel," ", 4000, NULL, 3, NULL, 1); // Low Pass Filter
+  xTaskCreatePinnedToCore(filtrar_vel," ", 4000, NULL, 4, NULL, 1); // Low Pass Filter
   xTaskCreatePinnedToCore(servosistema," ", 4000, NULL, 2 , NULL, 1); // Low Pass Filter
-
+  // xTaskCreatePinnedToCore(identificarSistema," ", 4000, NULL, 2 , NULL, 1); // Identification
 
 }
 

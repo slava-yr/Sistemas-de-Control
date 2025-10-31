@@ -1,7 +1,7 @@
 /*****************************
   Código de prueba de los dos motores para el proyecto de Sistemas de Control 2025-2
 
-  Revisado: 29/10/2025
+  Revisado: 31/10/2025
   
 *********************************/
 
@@ -20,9 +20,9 @@
 /* Encoder Pins */
 // Encoder motor 1 
 #define EncAM1 14
-#define EncAM2 26
-// Encoder motor 2
 #define EncBM1 27
+// Encoder motor 2
+#define EncAM2 26
 #define EncBM2 25
 
 // Filtro pasabajos
@@ -45,21 +45,22 @@ typedef struct {
   // Filtro pasabajos
   double y_k_1;
   int numbuffer;
+  double vmotor;
+  uint8_t id; // Identificador del motor
 }MotorVars;
 
 // Variables globales de motores
-MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-// Voltaje a enviar al motor
-double Vmotor = 5;
+MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2};
 
 void IRAM_ATTR ISR_FUN_M1() {
+  // Interruption Service Routine for Motor 1
   isr_func(&motor1, EncAM1, Resolucion);
 }
 
 void IRAM_ATTR ISR_FUN_M2() {
-  isr_func(&motor2, EncBM1, Resolucion);
+  // Interruption Service Routine for Motor 2
+  isr_func(&motor2, EncAM2, Resolucion);
 }
 
 void isr_func(MotorVars *m, int enc, int resolution)
@@ -148,62 +149,80 @@ void low_pass_filter(void *pvParameters)
 
 void variar_voltaje(void *pvParameters)
 {    
+  // Escalera de tensiones al motor
   while(1)
   {
     for (int volt = 2; volt <= 12; volt+=2)
     {
-      Vmotor = volt;
-      env_volt(volt);
+      env_volt(volt, AIN1, AIN2); // Motor 1
+      env_volt(volt, BIN1, BIN2); // Motor 2
       vTaskDelay(1000);
     }
   }
 }
 
-void mostrar_velocidad(void *pvParameters)
-{
-  double t = 0;
+void enviar_voltaje(void *pvParameters)
+{    
+  // Enviar voltaje a un motor e imprimir voltaje, velocidad y posición
+  MotorVars *m = (MotorVars *)pvParameters;  // point to the right motor
+  
+  m->vmotor = 6.0; // Voltaje a enviar
+  if (m->id == 1)
+  {
+    env_volt(m->vmotor, AIN1, AIN2);
+  }
+  else // m->id == 2
+  {
+    env_volt(m->vmotor, BIN1, BIN2);
+  }
+   
   while(1)
   {
-    Serial.print(t); // Vector de tiempo
+    Serial.print(m->vmotor); // Vector de voltaje 
     Serial.print("  	");
-    Serial.print(Vmotor); // Vector de voltaje 
+    Serial.print(m->vel_ang_filt); // Vector velocidad (tras filtro pasabajo)
     Serial.print("  	");
-    Serial.println(vel_ang_filt); // Vector velocidad (tras filtro pasabajo)
-    t+=0.025;
+    Serial.println(m->posicion); // Vector posición
+    Serial.println();
     vTaskDelay(25); // Cada 25 ms
   }
 }
 
 void setup() {
-  // Declare motor pins as output
-  pinMode(M1_CH_A, INPUT_PULLUP); // Encoder Motor 1
-  pinMode(STBY, OUTPUT);
+  // Encoders
+  pinMode(EncAM1, INPUT_PULLUP); // Encoder Motor 1
+  pinMode(EncBM1, INPUT_PULLUP); // Encoder Motor 1
+  pinMode(EncAM2, INPUT_PULLUP); // Encoder Motor 2
+  pinMode(EncBM2, INPUT_PULLUP); // Encoder Motor 2
+  
   pinMode(AIN1, OUTPUT);
   pinMode(AIN2, OUTPUT);
   pinMode(PWMA, OUTPUT);
-  // pinMode(BIN1, OUTPUT);
-  // pinMode(BIN2, OUTPUT);
-  // pinMode(PWMB, OUTPUT);
+  pinMode(BIN1, OUTPUT);
+  pinMode(BIN2, OUTPUT);
+  pinMode(PWMB, OUTPUT);
 
   // Setup PWM pins
-  ledcSetup(1,20000,10);
+  ledcSetup(1,20000,10); 
+  ledcSetup(2,20000,10);
 
   // Attach to motor pins
   ledcAttachPin(PWMA,1);
+  ledcAttachPin(PWMB,2);
 
   // Encoder
-  attachInterrupt(M1_CH_A, ISR_FUN_M1, RISING); // Triggered by encoder
+  attachInterrupt(EncAM1, ISR_FUN_M1, RISING); // Triggered by encoder
+  attachInterrupt(EncBM1, ISR_FUN_M2, RISING); // Triggered by encoder
 
   // Tasks
-  xTaskCreatePinnedToCore(low_pass_filter, "", 4000, NULL, 3, NULL, APP_CPU_NUM); // Create task
-  xTaskCreatePinnedToCore(variar_voltaje, "", 4000, NULL, 2, NULL, APP_CPU_NUM); // Create task
-  xTaskCreatePinnedToCore(mostrar_velocidad, "", 4000, NULL, 1, NULL, APP_CPU_NUM); // Create task
+  xTaskCreatePinnedToCore(low_pass_filter, "LPF_M1", 4000, &motor1, 1, NULL, APP_CPU_NUM); // LPF for motor 1
+  xTaskCreatePinnedToCore(low_pass_filter, "LPF_M2", 4000, &motor2, 1, NULL, APP_CPU_NUM); // LPF for motor 2
+  // xTaskCreatePinnedToCore(variar_voltaje, "", 4000, NULL, 2, NULL, APP_CPU_NUM); // Variar voltaje ambos motores
+  xTaskCreatePinnedToCore(enviar_voltaje, "Enviar_Voltaje_M1", 4000, &motor1, 2, NULL, APP_CPU_NUM); // Enviar voltaje motor 1
+  xTaskCreatePinnedToCore(enviar_voltaje, "Enviar_Voltaje_M2", 4000, &motor2, 2, NULL, APP_CPU_NUM); // Enviar voltaje motor 2
 
-
-  digitalWrite(STBY, HIGH); // Enable driver
   Serial.begin(115200);
   Serial.println("Setup done!");
 }
 
-void loop() {
-}
+void loop() {}
