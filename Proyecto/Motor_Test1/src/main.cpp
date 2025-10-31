@@ -5,6 +5,9 @@
   
 *********************************/
 
+// MOTOR 1: L
+// MOTOR 2: R
+
 #include <Arduino.h>
 /* Motor Driver Pins */
 // Motor 1
@@ -53,16 +56,6 @@ typedef struct {
 MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
 MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2};
 
-void IRAM_ATTR ISR_FUN_M1() {
-  // Interruption Service Routine for Motor 1
-  isr_func(&motor1, EncAM1, Resolucion);
-}
-
-void IRAM_ATTR ISR_FUN_M2() {
-  // Interruption Service Routine for Motor 2
-  isr_func(&motor2, EncAM2, Resolucion);
-}
-
 void isr_func(MotorVars *m, int enc, int resolution)
 {
   /* Interrupt Service Routine to update motor variables
@@ -102,7 +95,17 @@ void isr_func(MotorVars *m, int enc, int resolution)
   m->vel_1 = m->vel_ang;
 }
 
-void env_volt(double vp, uint8_t IN1, uint8_t IN2)
+void IRAM_ATTR ISR_FUN_M1() {
+  // Interruption Service Routine for Motor 1
+  isr_func(&motor1, EncAM1, Resolucion);
+}
+
+void IRAM_ATTR ISR_FUN_M2() {
+  // Interruption Service Routine for Motor 2
+  isr_func(&motor2, EncAM2, Resolucion);
+}
+
+void env_volt(double vp, uint8_t motor_id)
 {
   /* Send voltage to motor driver
     vp: voltage to send to motor
@@ -110,21 +113,35 @@ void env_volt(double vp, uint8_t IN1, uint8_t IN2)
     IN2: AIN2 / BIN2 pin
   */
   uint32_t Duty;
+  uint8_t IN1, IN2, ledchannel;
+
+  if (motor_id == 1)
+  {
+    IN1 = AIN1;
+    IN2 = AIN2;
+    ledchannel = 1;
+  }
+  else // motor_id == 2
+  {
+    IN1 = BIN2;
+    IN2 = BIN1;
+    ledchannel = 2;
+  }
  
   if (vp > VM) vp = VM;
-  if (vp < -VM) vp = -VM;
+  else if (vp < -VM) vp = -VM;
 
   if (vp >= 0)
   {
     Duty = (uint32_t)((1-vp/VM)*1023);
-    ledcWrite(1,1023-Duty);
+    ledcWrite(ledchannel,1023-Duty);
     digitalWrite(IN1, HIGH);
     digitalWrite(IN2, LOW);
   }
   else
   {
     Duty = (uint32_t)((1+vp/VM)*1023);
-    ledcWrite(1,1023-Duty);
+    ledcWrite(ledchannel,1023-Duty);
     digitalWrite(IN1, LOW);
     digitalWrite(IN2, HIGH);
   } 
@@ -154,8 +171,8 @@ void variar_voltaje(void *pvParameters)
   {
     for (int volt = 2; volt <= 12; volt+=2)
     {
-      env_volt(volt, AIN1, AIN2); // Motor 1
-      env_volt(volt, BIN1, BIN2); // Motor 2
+      env_volt(volt, 1); // Motor 1
+      env_volt(volt, 2); // Motor 2
       vTaskDelay(1000);
     }
   }
@@ -166,25 +183,46 @@ void enviar_voltaje(void *pvParameters)
   // Enviar voltaje a un motor e imprimir voltaje, velocidad y posición
   MotorVars *m = (MotorVars *)pvParameters;  // point to the right motor
   
-  m->vmotor = 6.0; // Voltaje a enviar
+  m->vmotor = 9.0; // Voltaje a enviar
   if (m->id == 1)
   {
-    env_volt(m->vmotor, AIN1, AIN2);
+    env_volt(m->vmotor, 1);
   }
   else // m->id == 2
   {
-    env_volt(m->vmotor, BIN1, BIN2);
+    env_volt(m->vmotor, 2);
   }
    
   while(1)
   {
-    Serial.print(m->vmotor); // Vector de voltaje 
-    Serial.print("  	");
-    Serial.print(m->vel_ang_filt); // Vector velocidad (tras filtro pasabajo)
-    Serial.print("  	");
-    Serial.println(m->posicion); // Vector posición
-    Serial.println();
+    // Serial.print("Motor ");
+    // Serial.print(m->id);
+    // Serial.print("  	");
+    // Serial.print(m->vmotor); // Vector de voltaje 
+    // Serial.print("  	");
+    // Serial.print(m->vel_ang_filt); // Vector velocidad (tras filtro pasabajo)
+    // Serial.print("  	");
+    // Serial.println(m->posicion); // Vector posición
     vTaskDelay(25); // Cada 25 ms
+  }
+}
+
+void printSpeed(void *pvParameters)
+{
+  while (1)
+  {
+    Serial.print("Motor 1");
+    Serial.print("  ");
+    Serial.print(motor1.vmotor);
+    Serial.print("  ");
+    Serial.print(motor1.vel_ang_filt);
+    Serial.print("  ");
+    Serial.print("Motor 2");
+    Serial.print("  ");
+    Serial.print(motor2.vmotor);
+    Serial.print("  ");
+    Serial.println(motor2.vel_ang_filt);
+    vTaskDelay(500);  // 500 ms delay
   }
 }
 
@@ -211,8 +249,8 @@ void setup() {
   ledcAttachPin(PWMB,2);
 
   // Encoder
-  attachInterrupt(EncAM1, ISR_FUN_M1, RISING); // Triggered by encoder
-  attachInterrupt(EncBM1, ISR_FUN_M2, RISING); // Triggered by encoder
+  attachInterrupt(EncAM1, ISR_FUN_M1, RISING); // Triggered by encoder (motor 1)
+  attachInterrupt(EncAM2, ISR_FUN_M2, RISING); // Triggered by encoder (motor 2)
 
   // Tasks
   xTaskCreatePinnedToCore(low_pass_filter, "LPF_M1", 4000, &motor1, 1, NULL, APP_CPU_NUM); // LPF for motor 1
@@ -220,7 +258,7 @@ void setup() {
   // xTaskCreatePinnedToCore(variar_voltaje, "", 4000, NULL, 2, NULL, APP_CPU_NUM); // Variar voltaje ambos motores
   xTaskCreatePinnedToCore(enviar_voltaje, "Enviar_Voltaje_M1", 4000, &motor1, 2, NULL, APP_CPU_NUM); // Enviar voltaje motor 1
   xTaskCreatePinnedToCore(enviar_voltaje, "Enviar_Voltaje_M2", 4000, &motor2, 2, NULL, APP_CPU_NUM); // Enviar voltaje motor 2
-
+  xTaskCreatePinnedToCore(printSpeed, "printSpeed", 4000, NULL, 1, NULL, APP_CPU_NUM); // Print speeds
   Serial.begin(115200);
   Serial.println("Setup done!");
 }
