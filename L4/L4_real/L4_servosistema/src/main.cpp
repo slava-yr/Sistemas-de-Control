@@ -98,7 +98,6 @@ void filtrar_vel(void *pvParameters) // Low pass filter
 
 void servosistema(void *pvParameters) // Servosistema
 {
-  // CAMNBIAR K1, K2 y T
   double t;
   double K1 = 0.0339;
   double K2_1 = 0.1508;
