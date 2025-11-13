@@ -13,8 +13,8 @@
 #include <PubSubClient.h>
 
 /* Wi-Fi and MQTT*/
-#define WIFI_SSID ""
-#define WIFI_PASSWORD ""
+#define WIFI_SSID "iPhone de Jose"
+#define WIFI_PASSWORD "Jj12345678"
 #define TOPIC "the_xspacer/val0408" // To publish into
 
 WiFiClient espClient;
@@ -43,8 +43,6 @@ PubSubClient client(espClient);
 #define wc 50 // Frecuencia de corte del filtro (rad/s)
 #define Tf 0.005 // Tiempo de muestreo (s) [5 ms]
 
-#define Resolucion 1801 // Número de pulsos por revolución del encoder
-// TODO: Definir resolución por encoder
 
 #define VM 11.1 // Voltaje máximo a los motores
 
@@ -60,12 +58,13 @@ typedef struct {
   double y_k_1;
   int numbuffer;
   double vmotor;
+  const uint16_t resolucion;
   uint8_t id; // Identificador del motor
 }MotorVars;
 
 // Variables globales de motores
-MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
-MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2};
+MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1080, 1};
+MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1083, 2};
 
 void isr_func(MotorVars *m, int enc, int resolution)
 {
@@ -108,12 +107,12 @@ void isr_func(MotorVars *m, int enc, int resolution)
 
 void IRAM_ATTR ISR_FUN_M1() {
   // Interruption Service Routine for Motor 1
-  isr_func(&motor1, EncAM1, Resolucion);
+  isr_func(&motor1, EncAM1, motor1.resolucion);
 }
 
 void IRAM_ATTR ISR_FUN_M2() {
   // Interruption Service Routine for Motor 2
-  isr_func(&motor2, EncAM2, Resolucion);
+  isr_func(&motor2, EncAM2, motor2.resolucion);
 }
 
 void env_volt(double vp, uint8_t motor_id)
@@ -133,8 +132,8 @@ void env_volt(double vp, uint8_t motor_id)
   }
   else // R
   {
-    IN1 = BIN1;
-    IN2 = BIN2;
+    IN1 = BIN2;
+    IN2 = BIN1;
   }
  
   // Saturation
@@ -158,27 +157,28 @@ void env_volt(double vp, uint8_t motor_id)
   } 
 }
 
-void low_pass_filter(void *pvParameters)
-{
-  MotorVars *m = (MotorVars *)pvParameters;  // point to the right motor
+// void low_pass_filter(void *pvParameters)
+// {
+//   MotorVars *m = (MotorVars *)pvParameters;  // point to the right motor
 
-  while (1)
-  {
-    double x_k = m->vel_ang_median;
-    double y_k = (1.0 / (wc * Tf + 1.0)) * (m->y_k_1 + wc * Tf * x_k);
-    m->y_k_1 = y_k;
-    m->vel_ang_filt = y_k;
+//   while (1)
+//   {
+//     double x_k = m->vel_ang_median;
+//     double y_k = (1.0 / (wc * Tf + 1.0)) * (m->y_k_1 + wc * Tf * x_k);
+//     m->y_k_1 = y_k;
+//     m->vel_ang_filt = y_k;
 
-    vTaskDelay(5);  // 5 ms delay
-  }
-}
+//     vTaskDelay(1);  // 1 ms delay
+//   }
+// }
 
 void enviar_voltaje(void *pvParameters)
 {    
   // Enviar voltaje a un motor e imprimir voltaje, velocidad y posición
   MotorVars *m = (MotorVars *)pvParameters;  // point to the right motor
   
-  m->vmotor = 9.0; // Voltaje a enviar
+  
+  m->vmotor = 3.0; // Voltaje a enviar
   if (m->id == 1) // L
   {
     env_volt(m->vmotor, 1);
@@ -187,48 +187,57 @@ void enviar_voltaje(void *pvParameters)
   {
     env_volt(m->vmotor, 2);
   }
-   
+  
   while(1)
   {
-    // Serial.print("Motor ");
-    // Serial.print(m->id);
-    // Serial.print("  	");
-    // Serial.print(m->vmotor); // Vector de voltaje 
-    // Serial.print("  	");
-    // Serial.print(m->vel_ang_filt); // Vector velocidad (tras filtro pasabajo)
-    // Serial.print("  	");
-    // Serial.println(m->posicion); // Vector posición
     vTaskDelay(25); // Cada 25 ms
+    if (millis() > 6000) // After 5 seconds, stop the motor
+    {
+      m->vmotor = 0.0;
+      if (m->id == 1) // L
+      {
+        env_volt(m->vmotor, 1);
+      }
+      else // m->id == 2 (R)
+      {
+        env_volt(m->vmotor, 2);
+      }
+    }
   }
 }
 
 void printSpeed(void *pvParameters)
 {
-  const uint16_t delay_ms = 50;
+  const uint16_t delay_ms = 1; // 1 ms
+  uint16_t t = 0;
   char msg_temp[64];
   while (1)
   {
-    Serial.print("Motor 1");
-    Serial.print("  ");
-    Serial.print(motor1.vmotor);
-    Serial.print("  ");
-    Serial.print(motor1.vel_ang_filt);
-    Serial.print("  ");
-    Serial.print("Motor 2");
-    Serial.print("  ");
-    Serial.print(motor2.vmotor);
-    Serial.print("  ");
-    Serial.println(motor2.vel_ang_filt);
-    
-    // --- MQTT publish ---
-    client.loop(); // keep connection alive
-    snprintf(msg_temp, sizeof(msg_temp),
-             "{\"m1\":%.3f,\"m2\":%.3f}",
-             motor1.vel_ang_filt,
-             motor2.vel_ang_filt);
-    client.publish(TOPIC, msg_temp);
-
-    vTaskDelay(delay_ms);  
+    if (t < 400)
+    {
+      Serial.print(t);
+      Serial.print("  ");
+      Serial.print("Motor_L");
+      Serial.print("  ");
+      Serial.print(motor1.vmotor);
+      Serial.print("  ");
+      Serial.print(motor1.vel_ang);
+      Serial.print("  ");
+      Serial.print("Motor_R");
+      Serial.print("  ");
+      Serial.print(motor2.vmotor);
+      Serial.print("  ");
+      Serial.println(motor2.vel_ang);
+      t += delay_ms;
+      // // --- MQTT publish ---
+      // client.loop(); // keep connection alive
+      // snprintf(msg_temp, sizeof(msg_temp),
+      //          "{\"m1\":%.3f,\"m2\":%.3f}",
+      //          motor1.vel_ang_filt,
+      //          motor2.vel_ang_filt);
+      // client.publish(TOPIC, msg_temp); 
+    }  
+    vTaskDelay(delay_ms); 
   }
 }
 
@@ -256,35 +265,38 @@ void setup() {
 
   Serial.begin(115200);
   
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-  	delay(1000);
-  	Serial.println("Conectando a WiFi...");
-  }
-  Serial.println("Conectado a WiFi ");
+  // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // while (WiFi.status() != WL_CONNECTED) {
+  // 	delay(1000);
+  // 	Serial.println("Conectando a WiFi...");
+  // }
+  // Serial.println("Conectado a WiFi ");
 
-  // MQTT
-  client.setServer("www.xspace.pe", 1883); 
-	while (!client.connected())
-  { 
-    Serial.println("Connecting to MQTT...");
-    if (client.connect("ESP32Client")) 
-      Serial.println("connected");
-    else
-    {
-      Serial.print("failed with state ");
-    	Serial.print(client.state());
-      delay(1000);
-    }
-  }
+  // // MQTT
+  // client.setServer("www.xspace.pe", 1883); 
+	// while (!client.connected())
+  // { 
+  //   Serial.println("Connecting to MQTT...");
+  //   if (client.connect("ESP32Client")) 
+  //     Serial.println("connected");
+  //   else
+  //   {
+  //     Serial.print("failed with state ");
+  //   	Serial.print(client.state());
+  //     delay(1000);
+  //   }
+  // }
 
+  Serial.println("Starting setup...");
+  delay(5000); // Delay 1 second before starting
+  Serial.println("Setup started.");
   // Encoder
   attachInterrupt(EncAM1, ISR_FUN_M1, RISING); // Triggered by encoder (motor 1)
   attachInterrupt(EncAM2, ISR_FUN_M2, RISING); // Triggered by encoder (motor 2)
 
   // Tasks
-  xTaskCreatePinnedToCore(low_pass_filter, "LPF_M1", 4000, &motor1, 1, NULL, APP_CPU_NUM); // LPF for motor 1
-  xTaskCreatePinnedToCore(low_pass_filter, "LPF_M2", 4000, &motor2, 1, NULL, APP_CPU_NUM); // LPF for motor 2
+  // xTaskCreatePinnedToCore(low_pass_filter, "LPF_M1", 4000, &motor1, 1, NULL, APP_CPU_NUM); // LPF for motor 1
+  // xTaskCreatePinnedToCore(low_pass_filter, "LPF_M2", 4000, &motor2, 1, NULL, APP_CPU_NUM); // LPF for motor 2
   xTaskCreatePinnedToCore(enviar_voltaje, "Enviar_Voltaje_M1", 4000, &motor1, 2, NULL, APP_CPU_NUM); // Enviar voltaje motor 1
   xTaskCreatePinnedToCore(enviar_voltaje, "Enviar_Voltaje_M2", 4000, &motor2, 2, NULL, APP_CPU_NUM); // Enviar voltaje motor 2
   xTaskCreatePinnedToCore(printSpeed, "printSpeed", 4000, NULL, 1, NULL, APP_CPU_NUM); // Print speeds

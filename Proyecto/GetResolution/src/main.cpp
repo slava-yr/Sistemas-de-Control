@@ -7,7 +7,7 @@
 
 
 #include <Arduino.h> 
-#define M1_CH_A 15 // Encoder Motor 1
+#define M1_CH_A 14 //26 // Encoder Motor 1
 
 uint32_t counter = 0;
 void IRAM_ATTR ISR_FUN_M1() // Calcula el periodo
