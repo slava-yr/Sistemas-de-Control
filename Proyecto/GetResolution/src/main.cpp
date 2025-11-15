@@ -7,12 +7,26 @@
 
 
 #include <Arduino.h> 
-#define M1_CH_A 14 //26 // Encoder Motor 1
+/* Encoder Pins */
+// Encoder motor 1 
+#define EncAM1 14
+#define EncBM1 27
+// Encoder motor 2
+#define EncAM2 26
+#define EncBM2 25
 
-uint32_t counter = 0;
+int32_t counter = 0;
 void IRAM_ATTR ISR_FUN_M1() // Calcula el periodo
 {
-  counter++;
+  uint8_t a = digitalRead(EncAM2);
+  uint8_t b = digitalRead(EncBM2);
+  Serial.print(a);
+  Serial.print("  ");
+  Serial.println(b);
+  if (a)
+    counter++;
+  else
+    counter--;
 }
 
 void print_counter(void *pvParameters)
@@ -25,10 +39,11 @@ void print_counter(void *pvParameters)
 }
 
 void setup() {
-  pinMode(M1_CH_A, INPUT_PULLUP);
-  attachInterrupt(M1_CH_A, ISR_FUN_M1, RISING); // Triggered by encoder
+  pinMode(EncAM2, INPUT_PULLUP);
+  pinMode(EncBM2, INPUT_PULLUP);
+  attachInterrupt(EncBM2, ISR_FUN_M1, RISING); // Triggered by encoder
 
-  xTaskCreatePinnedToCore(print_counter, "", 4000, NULL, 1, NULL, APP_CPU_NUM);
+  // xTaskCreatePinnedToCore(print_counter, "", 4000, NULL, 1, NULL, APP_CPU_NUM);
   Serial.begin(115200);
   Serial.println("Setup done!");
 }
