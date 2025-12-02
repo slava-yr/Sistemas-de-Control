@@ -406,7 +406,7 @@ data50 = [
 1000  Motor_L  1.86  50.20  Motor_R  1.91  50.37];
 
 %%
-data = data50;
+data = data240;
 t = data(:,1);
 
 % Extract speeds
@@ -420,5 +420,5 @@ plot(t, speed_R, 'r', 'LineWidth', 1.5);
 xlabel('Time (ms)');
 ylabel('Speed (deg/s)');
 legend('Motor L', 'Motor R');
-title('Motor Speeds vs Time');
+title('Motor Speeds vs Time (Ref: 240)');
 grid on;
