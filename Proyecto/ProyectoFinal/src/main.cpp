@@ -3,7 +3,7 @@
   HMI web TENSIÓN – TIEMPO – VELOCIDAD
   Motor IZQ (motor1) y Motor DER (motor2)
 
-  Actualizado: 02/12/2025
+  Actualizado: 03/12/2025
 *****************************/
 
 #include <Arduino.h>
@@ -57,11 +57,17 @@ typedef struct {
   const uint16_t resolucion;
   double Kp; // For PI
   uint8_t id; // Identificador del motor
+  double vel_d;
 }MotorVars;
 
 // Variables globales de motores
-MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1080, 0.014, 1};
-MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1083, 0.0142, 2};
+MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1080, 0.014, 1, 0};
+MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1083, 0.0142, 2, 0};
+
+// Variables globales de posición
+double phi;
+double x, xd, xdp;
+double y, yd, ydp;
 
 /* ====== PÁGINA HTML ====== */
 const char MAIN_page[] PROGMEM = R"=====( 
@@ -261,7 +267,7 @@ void speed_control(void *pvParameters)
 
   double t = 0;
   double T = 0.001; // Periodo de muestreo
-  double vel_d = 200; // 200 deg/s
+  // double vel_d = 200; // 200 deg/s
 
   // Parámetros del controlador PI
   double Ti = 0.0625;
@@ -273,7 +279,7 @@ void speed_control(void *pvParameters)
   
   while(1)
   {
-    e = vel_d - m->vel_ang_median;
+    e = m->vel_d - m->vel_ang_median;
     I = I_ant + e*T;
     u = m->Kp * (e + (1/Ti)*I);
 
@@ -293,30 +299,122 @@ void speed_control(void *pvParameters)
   }
 }
 
-void printSpeed(void *pvParameters)
+void seguimientoTrayectoria(void *pvParameters)
 {
-  const uint16_t delay_ms = 5; // 1 ms
-  uint16_t t = 0;
-  char msg_temp[64];
-  while (1)
+  // Sigue la trayectoria definida por generadorTrayectoria
+  // xd, xdp, yd, ydp, phi actualizados en generadorTrayectoria
+
+
+  double a = 12.3/100; // En m
+  double Tes = 3;
+  double K1 = 4/Tes, K2 = 4/Tes;
+  double x = 0, y = 0, av1 = 0, av2 = 0;
+  double r = 34.5/1000;
+  double d = 147/1000;
+  // referencias
+  double U_ref, W_ref, wd_ref, wi_ref;
+  // Errores
+  double xe = 0; 
+  double ye = 0;
+ 
+  double t = 0; // t en segundos
+  double dt = 100; // dt en ms
+  while(1)
   {
-    Serial.print(t);
-    Serial.print("  ");
-    Serial.print("Motor_L");
-    Serial.print("  ");
-    Serial.print(motor1.vmotor);
-    Serial.print("  ");
-    Serial.print(motor1.vel_ang_median);
-    Serial.print("  ");
-    Serial.print("Motor_R");
-    Serial.print("  ");
-    Serial.print(motor2.vmotor);
-    Serial.print("  ");
-    Serial.println(motor2.vel_ang_median);
-    t += delay_ms;
-    vTaskDelay(delay_ms); 
+    generadorTrayectoria(t); // Actualizar valores
+
+    x = x + a*cos(phi);
+    y = y + a*sin(phi);
+
+    // Error
+    xe = xd - x; 
+    ye = yd - y;
+
+    // Control de trayectoria
+    av1 = K1*xe + xdp;
+    av2 = K2*ye + ydp;
+
+    U_ref = cos(phi)*av1 + sin(phi)*av2;
+    W_ref = -sin(phi)/a*av1 + cos(phi)/a*av2;
+
+    // Actualizar velocidad deseada para los motores
+    motor1.vel_d = (U_ref*2/r - W_ref*d/r)/2*180/PI;
+    motor2.vel_d = (U_ref*2/r + W_ref*d/r)/2*180/PI;
+
+    t += dt/1000; // Actualizar el tiempo
+    vTaskDelay(dt); // Probar con diferentes valores
   }
 }
+
+void generadorTrayectoria(double t)
+{
+  // Actualiza xd, xdp, yd, ydp, phi
+
+  // Definiciones
+  double V_ref = 0.1; // velocidad deseada (m/s)
+  double distancia_s1 = 0.22; // Recta inicial
+  double radio_s2 = 0.10; // 1ra U (Izquierda)
+  double distancia_s3 = 0.05; // Recta retorno corta
+  double radio_s4 = 0.10; // 2da U (Panza/Derecha)
+  double distancia_s5 = 0.40; // Recta larga
+  double radio_s6 = 0.10; // 3ra U (Final/Derecha)
+  double radio_s7 = 0.10; // Giro 90 grados (Izquierda)
+  double distancia_s8 = 0.10; // Recta final bajando
+
+  // Tiempos (en segundos)
+  double dt1, dt2, dt3, dt4, dt5, dt6, dt7, dt8; 
+  double T1, T2, T3, T4, T5, T6, T7, T8;
+
+  dt1 = distancia_s1 / V_ref;
+  dt2 = (PI * radio_s2) / V_ref; 
+  dt4 = (PI * radio_s4) / V_ref; 
+  dt5 = distancia_s5 / V_ref;
+  dt6 = (PI * radio_s6) / V_ref; 
+  dt7 = (0.5 * PI * radio_s7) / V_ref;
+  dt8 = distancia_s8 / V_ref;
+
+  T1 = dt1;
+  T2 = T1 + dt2;
+  T3 = T2 + dt3;
+  T4 = T3 + dt4;
+  T5 = T4 + dt5;
+  T6 = T5 + dt6;
+  T7 = T6 + dt7;
+  T8 = T7 + dt8;
+
+  // Posiciones finales
+
+  /*====== CONTROL ========*/
+
+
+  // Completar
+}
+
+
+// void printSpeed(void *pvParameters)
+// {
+//   const uint16_t delay_ms = 5; // 1 ms
+//   uint16_t t = 0;
+//   char msg_temp[64];
+//   while (1)
+//   {
+//     Serial.print(t);
+//     Serial.print("  ");
+//     Serial.print("Motor_L");
+//     Serial.print("  ");
+//     Serial.print(motor1.vmotor);
+//     Serial.print("  ");
+//     Serial.print(motor1.vel_ang_median);
+//     Serial.print("  ");
+//     Serial.print("Motor_R");
+//     Serial.print("  ");
+//     Serial.print(motor2.vmotor);
+//     Serial.print("  ");
+//     Serial.println(motor2.vel_ang_median);
+//     t += delay_ms;
+//     vTaskDelay(delay_ms); 
+//   }
+// }
 
 /* ====== HANDLERS WEB ====== */
 
@@ -382,7 +480,8 @@ void setup() {
   // Tasks
   xTaskCreatePinnedToCore(speed_control, "Speed_Control_M1", 4000, &motor1, 2, NULL, APP_CPU_NUM); // Speed control motor 1
   xTaskCreatePinnedToCore(speed_control, "Speed_Control_M2", 4000, &motor2, 2, NULL, APP_CPU_NUM); // Speed control motor 1
-  xTaskCreatePinnedToCore(printSpeed, "printSpeed", 4000, NULL, 1, NULL, APP_CPU_NUM); // Print speeds
+  xTaskCreatePinnedToCore(seguimientoTrayectoria, "SeguimientoTrayectoria", 4000, NULL, 1, NULL, APP_CPU_NUM); // Speed control motor 1
+  // xTaskCreatePinnedToCore(printSpeed, "printSpeed", 4000, NULL, 1, NULL, APP_CPU_NUM); // Print speeds
 
   Serial.println("Setup done!");
 }
