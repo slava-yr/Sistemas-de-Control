@@ -281,7 +281,11 @@ void speed_control(void *pvParameters)
     u = m->Kp * (e + (1/Ti)*I);
 
     if (u < 0) u = 0; // *Saturar para evitar el error por el encoder 
-    
+    if (fin_trayectoria)
+    {
+      u = 0;
+    }
+
     // Send voltage to the correct motor
     if (m->id == 1) // L
     {
@@ -424,10 +428,6 @@ void generadorTrayectoria(double t)
   {
     xd = xf7;
     yd = yf6;
-    xdp = 0; 
-    ydp = 0;
-    phid = 0;  
-
     fin_trayectoria = true;
   }
 }
@@ -450,31 +450,33 @@ void seguimientoTrayectoria(void *pvParameters)
   double ye = 0;
  
   double t = 0; // t en segundos
-  double dt = 100; // dt en ms
+  double dt = 20; // dt en ms
 
-  double vrobot, wrobot, phi_est;
+  double vrobot, wrobot, phi_est = 0;
   while(1)
   {
     generadorTrayectoria(t); // Actualizar valores
     
     if (fin_trayectoria)
     {
-      motor1.vel_d = 0;
-      motor2.vel_d = 0;
+      // Apagar motores
+      motor1.vmotor = 0;
+      motor2.vmotor = 0;
     }
 
     else
     {
       // Estimaciones de posición y trayectoria
       vrobot = (r/2.0) * (motor2.vel_ang_median + motor1.vel_ang_median)*PI/180;
-      wrobot = ((r/d) * (motor2.vel_ang_median - motor1.vel_ang_median))*PI/180;
-      phi_est += wrobot * dt/1000;
-
-      if (phi_est > PI) phi_est -= 2*PI;
-      if (phi_est < -PI) phi_est += 2*PI;
+      wrobot = ((r/d) * (motor2.vel_ang_median - motor1.vel_ang_median))*PI/180;    
       
       x += vrobot * cos(phi_est) * dt/1000;
       y += vrobot * sin(phi_est) * dt/1000;
+      
+      phi_est += wrobot * dt/1000; // Update phi_est
+      if (phi_est > PI) phi_est -= 2*PI;
+      if (phi_est < -PI) phi_est += 2*PI;
+
       phi = phi_est;
 
       // Error
