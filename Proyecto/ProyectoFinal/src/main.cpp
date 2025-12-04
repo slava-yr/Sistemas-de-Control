@@ -303,7 +303,7 @@ void speed_control(void *pvParameters)
 void generadorTrayectoria(double t)
 {
   double V_ref = 0.1; 
-  double V_ref_g = 0.05;
+  double V_ref_g = 0.08;
   double distancia_s1 = 0.22; 
   double radio_s2 = 0.206; 
   double radio_s4 = 0.206; 
