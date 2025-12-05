@@ -273,44 +273,45 @@ void speed_control(void *pvParameters)
   double I = 0;
   double e = 0;
   double u = 0;
-  
+  double vel_d_clamped = 0, u_clamped = 0; // saturación
   while(1)
   {
-    e = m->vel_d - m->vel_ang_median;
+    if (fin_trayectoria)
+    {
+      env_volt(0, m->id);
+      vTaskDelay(1000);
+      continue;
+    }
+
+    vel_d_clamped = constrain(m->vel_d, 0.0, 400.0);
+    e = vel_d_clamped - m->vel_ang_median;
     I = I_ant + e*T;
     u = m->Kp * (e + (1/Ti)*I);
 
-    if (u < 0) u = 0; // *Saturar para evitar el error por el encoder 
-    if (fin_trayectoria)
+    u_clamped = constrain(u, 0.0, VM);
+    
+    // Anti-windup
+    if (u == u_clamped) // Dentro de los límites
     {
-      u = 0;
+      I_ant = I;
     }
 
-    // Send voltage to the correct motor
-    if (m->id == 1) // L
-    {
-      env_volt(u, 1);
-    }
-    else // m->id == 2 (R)
-    {
-      env_volt(u, 2);
-    }
-    I_ant = I;
+    env_volt(u_clamped, m->id);
     vTaskDelay(1);
   }
 }
 
 void generadorTrayectoria(double t)
 {
-  double V_ref = 0.1; 
+  double V_ref = 0.08; 
   double V_ref_g = 0.08;
   double distancia_s1 = 0.22; 
   double radio_s2 = 0.206; 
   double radio_s4 = 0.206; 
   double distancia_s5 = 0.40; 
-  double radio_s6 = 0.125; 
-  double radio_s7 = 0.175; 
-  double distancia_s8 = 0.20; 
+  double radio_s6 = 0.206;//0.125; 
+  double radio_s7 = 0.206;//0.175; 
+  double distancia_s8 = 0.50; 
 
   double dt1, dt2, dt3, dt4, dt5, dt6, dt7; 
   double T1, T2, T3, T4, T5, T6, T7;
@@ -320,7 +321,7 @@ void generadorTrayectoria(double t)
   dt3 = (PI * radio_s4) / V_ref_g; 
   dt4 = distancia_s5 / V_ref;
   dt5 = (0.5 * PI * radio_s6) / V_ref_g; 
-  dt6 = (0.5 * PI * radio_s7) / V_ref_g;
+  dt6 = (0.5 * PI * radio_s7) / V_ref_g; 
   dt7 = distancia_s8 / V_ref;
 
   T1 = dt1;
@@ -437,7 +438,7 @@ void seguimientoTrayectoria(void *pvParameters)
   // Sigue la trayectoria definida por generadorTrayectoria
   // xd, xdp, yd, ydp, phi actualizados en generadorTrayectoria
   double a = 12.3/100; // En m
-  double Tes = 1.5;
+  double Tes = 2;
   double K1 = 4/Tes, K2 = 4/Tes;
   double x = 0, y = 0, av1 = 0, av2 = 0;
 
@@ -450,7 +451,7 @@ void seguimientoTrayectoria(void *pvParameters)
   double ye = 0;
  
   double t = 0; // t en segundos
-  double dt = 20; // dt en ms
+  double dt = 50; // dt en ms
 
   double vrobot, wrobot, phi_est = 0;
   while(1)
@@ -566,8 +567,7 @@ void setup() {
   xTaskCreatePinnedToCore(speed_control, "Speed_Control_M1", 4000, &motor1, 2, NULL, APP_CPU_NUM); // Speed control motor 1
   xTaskCreatePinnedToCore(speed_control, "Speed_Control_M2", 4000, &motor2, 2, NULL, APP_CPU_NUM); // Speed control motor 1
   xTaskCreatePinnedToCore(seguimientoTrayectoria, "SeguimientoTrayectoria", 4000, NULL, 1, NULL, APP_CPU_NUM); // Seguimiento de la trayectoria
-  // xTaskCreatePinnedToCore(printSpeed, "printSpeed", 4000, NULL, 1, NULL, APP_CPU_NUM); // Print speeds
-
+  
   Serial.println("Setup done!");
 }
 
