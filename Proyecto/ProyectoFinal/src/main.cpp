@@ -28,6 +28,11 @@ WebServer server(80);
 #define BIN2 17 
 #define PWMB 16 
 
+// Low Pass Filter
+// Filtro pasabajos
+#define wc 50 // Frecuencia de corte del filtro (rad/s)
+#define Tf 0.005 // Tiempo de muestreo (s) [5 ms]
+
 /* Encoder Pins */
 // Encoder motor IZQ
 #define EncAM1 14
@@ -54,11 +59,12 @@ typedef struct {
   double Kp; // For PI
   uint8_t id; // Identificador del motor
   double vel_d;
+  double vel_ang_filt;
 }MotorVars;
 
 // Variables globales de motores
-MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1080, 0.014, 1, 0};
-MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1083, 0.0142, 2, 0};
+MotorVars motor1 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1080, 0.0571, 1, 0, 0};
+MotorVars motor2 = {1000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1083, 0.0571, 2, 0, 0};
 
 // Variables globales de posición
 double phid, phi;
@@ -210,6 +216,21 @@ void isr_func(MotorVars *m, int enc, int resolution) {
   m->vel_1 = m->vel_ang;
 }
 
+void low_pass_filter(void *pvParameters)
+{
+  MotorVars *m = (MotorVars *)pvParameters;  // point to the right motor
+
+  while (1)
+  {
+    double x_k = m->vel_ang_median;
+    double y_k = (1.0 / (wc * Tf + 1.0)) * (m->y_k_1 + wc * Tf * x_k);
+    m->y_k_1 = y_k;
+    m->vel_ang_filt = y_k;
+
+    vTaskDelay(5);  // 5 ms delay
+  }
+}
+
 void IRAM_ATTR ISR_FUN_M1() { isr_func(&motor1, EncAM1, motor1.resolucion); }
 void IRAM_ATTR ISR_FUN_M2() { isr_func(&motor2, EncAM2, motor2.resolucion); }
 
@@ -267,7 +288,7 @@ void speed_control(void *pvParameters)
 
   m->vel_d = 200; 
   // Parámetros del controlador PI
-  double Ti = 0.0625;
+  double Ti = 0.0312;
 
   double I_ant = 0;
   double I = 0;
@@ -284,11 +305,11 @@ void speed_control(void *pvParameters)
     }
 
     vel_d_clamped = constrain(m->vel_d, 0.0, 400.0);
-    e = vel_d_clamped - m->vel_ang_median;
+    e = vel_d_clamped - m->vel_ang_filt;
     I = I_ant + e*T;
     u = m->Kp * (e + (1/Ti)*I);
 
-    u_clamped = constrain(u, 0.0, VM);
+    u_clamped = constrain(u, 1.0, VM);
     
     // Anti-windup
     if (u == u_clamped) // Dentro de los límites
@@ -303,24 +324,24 @@ void speed_control(void *pvParameters)
 
 void generadorTrayectoria(double t)
 {
-  double V_ref = 0.08; 
-  double V_ref_g = 0.08;
+  double V_ref = 0.15; 
+  double V_ref_g = 0.1;
   double distancia_s1 = 0.22; 
-  double radio_s2 = 0.206; 
-  double radio_s4 = 0.206; 
-  double distancia_s5 = 0.40; 
-  double radio_s6 = 0.206;//0.125; 
-  double radio_s7 = 0.206;//0.175; 
+  double radio_s2 = 0.15; 
+  double radio_s4 = 0.23; 
+  double distancia_s5 = 0.8; 
+  double radio_s6 = 0.08;//0.125; 
+  double radio_s7 = 0.05;//0.175; 
   double distancia_s8 = 0.50; 
 
   double dt1, dt2, dt3, dt4, dt5, dt6, dt7; 
   double T1, T2, T3, T4, T5, T6, T7;
 
   dt1 = distancia_s1 / V_ref;
-  dt2 = (PI * radio_s2) / V_ref_g;
+  dt2 = (0.6*PI * radio_s2) / V_ref_g;
   dt3 = (PI * radio_s4) / V_ref_g; 
   dt4 = distancia_s5 / V_ref;
-  dt5 = (0.5 * PI * radio_s6) / V_ref_g; 
+  dt5 = (0.5*PI * radio_s6) / V_ref_g; 
   dt6 = (0.5 * PI * radio_s7) / V_ref_g; 
   dt7 = distancia_s8 / V_ref;
 
@@ -437,8 +458,8 @@ void seguimientoTrayectoria(void *pvParameters)
 {
   // Sigue la trayectoria definida por generadorTrayectoria
   // xd, xdp, yd, ydp, phi actualizados en generadorTrayectoria
-  double a = 12.3/100; // En m
-  double Tes = 2;
+  double a = 6.35/100; // En m
+  double Tes = 0.8;
   double K1 = 4/Tes, K2 = 4/Tes;
   double x = 0, y = 0, av1 = 0, av2 = 0;
 
@@ -451,7 +472,7 @@ void seguimientoTrayectoria(void *pvParameters)
   double ye = 0;
  
   double t = 0; // t en segundos
-  double dt = 50; // dt en ms
+  double dt = 20; // dt en ms
 
   double vrobot, wrobot, phi_est = 0;
   while(1)
@@ -468,8 +489,8 @@ void seguimientoTrayectoria(void *pvParameters)
     else
     {
       // Estimaciones de posición y trayectoria
-      vrobot = (r/2.0) * (motor2.vel_ang_median + motor1.vel_ang_median)*PI/180;
-      wrobot = ((r/d) * (motor2.vel_ang_median - motor1.vel_ang_median))*PI/180;    
+      vrobot = (r/2.0) * (motor2.vel_ang_filt + motor1.vel_ang_filt)*PI/180;
+      wrobot = ((r/d) * (motor2.vel_ang_filt - motor1.vel_ang_filt))*PI/180;    
       
       x += vrobot * cos(phi_est) * dt/1000;
       y += vrobot * sin(phi_est) * dt/1000;
@@ -516,8 +537,8 @@ void handleStatus() {
   json += "\"tension_izq\":" + String(motor1.vmotor,       3) + ",";
   json += "\"tension_der\":" + String(phi,       3) + ",";
   json += "\"tiempo\":"      + String(t_s,                  3) + ",";
-  json += "\"vel_izq\":"     + String(motor1.vel_ang_median, 3) + ",";
-  json += "\"vel_der\":"     + String(motor2.vel_ang_median, 3);
+  json += "\"vel_izq\":"     + String(motor1.vel_ang_filt, 3) + ",";
+  json += "\"vel_der\":"     + String(motor2.vel_ang_filt, 3);
   
   json += "}";
 
@@ -564,8 +585,10 @@ void setup() {
   attachInterrupt(EncAM2, ISR_FUN_M2, RISING);
 
   // Tasks
-  xTaskCreatePinnedToCore(speed_control, "Speed_Control_M1", 4000, &motor1, 2, NULL, APP_CPU_NUM); // Speed control motor 1
-  xTaskCreatePinnedToCore(speed_control, "Speed_Control_M2", 4000, &motor2, 2, NULL, APP_CPU_NUM); // Speed control motor 1
+  xTaskCreatePinnedToCore(low_pass_filter, "LPF_M1", 4000, &motor1, 2, NULL, APP_CPU_NUM); // LPF for motor 1
+  xTaskCreatePinnedToCore(low_pass_filter, "LPF_M2", 4000, &motor2, 2, NULL, APP_CPU_NUM); // LPF for motor 2
+  xTaskCreatePinnedToCore(speed_control, "Speed_Control_M1", 4000, &motor1, 3, NULL, APP_CPU_NUM); // Speed control motor 1
+  xTaskCreatePinnedToCore(speed_control, "Speed_Control_M2", 4000, &motor2, 3, NULL, APP_CPU_NUM); // Speed control motor 1
   xTaskCreatePinnedToCore(seguimientoTrayectoria, "SeguimientoTrayectoria", 4000, NULL, 1, NULL, APP_CPU_NUM); // Seguimiento de la trayectoria
   
   Serial.println("Setup done!");
